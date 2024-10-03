@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Data.HashFunction;
+using System.Data.HashFunction.Jenkins;
 using System.Globalization;
 using System.Numerics;
 using System.Security.Cryptography;
@@ -8,10 +9,10 @@ using System.Text;
 
 namespace SimhashLib
 {
-
     public class Simhash
     {
-        public enum HashingType {
+        public enum HashingType
+        {
             MD5,
             Jenkins
         }
@@ -48,7 +49,7 @@ namespace SimhashLib
 
         public void GenerateSimhash(List<string> features)
         {
-            switch(hashAlgorithm)
+            switch (hashAlgorithm)
             {
                 case HashingType.MD5:
                     build_by_features_md5(features);
@@ -56,7 +57,6 @@ namespace SimhashLib
                 default:
                     build_by_features_jenkins(features);
                     break;
-
             }
         }
 
@@ -95,7 +95,7 @@ namespace SimhashLib
 
             value = makeFingerprint(v, masks);
         }
-       
+
         private void build_by_features_md5(List<string> features)
         {
             int[] v = setupFingerprint();
@@ -151,10 +151,10 @@ namespace SimhashLib
 
         public ulong hashfuncjenkins(string x)
         {
-            var jenkinsLookup3 = new JenkinsLookup3(64);
+            var jenkinsLookup3 = JenkinsLookup3Factory.Instance.Create(new JenkinsLookup3Config() { HashSizeInBits = 64 });
             var resultBytes = jenkinsLookup3.ComputeHash(x);
 
-            var y = BitConverter.ToUInt64(resultBytes,0);
+            var y = BitConverter.ToUInt64(resultBytes.Hash, 0);
 
             return y;
         }
