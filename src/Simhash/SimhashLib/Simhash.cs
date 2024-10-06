@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Data.HashFunction;
 using System.Data.HashFunction.Jenkins;
 using System.Globalization;
+using System.Linq;
 using System.Numerics;
 using System.Security.Cryptography;
 using System.Text;
@@ -16,25 +17,36 @@ namespace SimhashLib
             MD5,
             Jenkins
         }
-        public int fpSize = 64;
+        public int SizeInBits { get; private set; }
+        public byte[] Value { get; private set; }
 
-        public ulong value { get; set; }
-
-        public Simhash()
+        public Simhash(int sizeInBits = 64)
         {
+            SetSize(sizeInBits);
         }
-        public Simhash(HashingType hashingType)
+
+        public Simhash(HashingType hashingType, int sizeInBits = 64)
         {
             hashAlgorithm = hashingType;
+            SetSize(sizeInBits);
         }
 
         public Simhash(Simhash simHash)
         {
-            value = simHash.value;
+            Value = simHash.Value;
+            SizeInBits = simHash.SizeInBits;
         }
-        public Simhash(ulong fingerPrint)
+        public Simhash(byte[] fingerPrint)
         {
-            value = fingerPrint;
+            Value = fingerPrint;
+            SizeInBits = fingerPrint.Length * 8;
+        }
+
+        private void SetSize(int sizeInBits)
+        {
+            if (sizeInBits % 8 != 0)
+                throw new ArgumentException("Argument 'sizeInBits' has to be a multiple of 8");
+            SizeInBits = sizeInBits;
         }
 
         public void GenerateSimhash(string content)
@@ -52,138 +64,128 @@ namespace SimhashLib
             switch (hashAlgorithm)
             {
                 case HashingType.MD5:
-                    build_by_features_md5(features);
+                    BuildByFeaturesMd5(features);
                     break;
                 default:
-                    build_by_features_jenkins(features);
+                    BuildByFeaturesJenkins(features);
                     break;
             }
         }
 
-        public long GetFingerprintAsLong()
+        public int Distance(Simhash another)
         {
-            return Converters.ConvertUlongToLong(value);
-        }
+            if (SizeInBits != another.SizeInBits) throw new Exception($"Compared Simhashes differs in size {SizeInBits}x{another.SizeInBits}");
 
-        public int distance(Simhash another)
-        {
-            if (fpSize != another.fpSize) throw new Exception();
-            ulong x = (value ^ another.value) & (ulong.MaxValue);
-            int ans = 0;
-            while (x > 0)
+            var bytes = SizeInBits / 8;
+            var xorBytes = new byte[bytes];
+            for (int i = 0; i < bytes; i++)
             {
-                ans++;
-                x &= x - 1;
+                xorBytes[i] = (byte)(Value[i] ^ another.Value[i]);
+            }
+
+            int ans = 0;
+            bool end = false;
+            while (!end)
+            {
+                for (int i = bytes - 1; i >= 0; i--)
+                {
+                    if (xorBytes[i] > 0)
+                    {
+                        xorBytes[i] &= (byte)(xorBytes[i] - 1);
+                        break;
+                    }
+                }
+                if (xorBytes.All(x => x == 0))
+                    end = true;//zero at least significant byte
+                else
+                    ans++;
             }
             return ans;
         }
-        private void build_by_features_jenkins(List<string> features)
+
+        private void BuildByFeaturesJenkins(List<string> features)
         {
-            int[] v = setupFingerprint();
-            ulong[] masks = setupMasks();
+            int[] v = SetupFingerprint();
 
             foreach (string feature in features)
             {
-                ulong h = hashfuncjenkins(feature);
+                var h = HashFuncJenkins(feature);
                 int w = 1;
-                for (int i = 0; i < fpSize; i++)
+                for (int i = 0; i < SizeInBits; i++)
                 {
-                    ulong result = h & masks[i];
+                    byte result = (byte)(h[i / 8] & (1 << (7 - (i % 8))));
                     v[i] += (result > 0) ? w : -w;
                 }
             }
 
-            value = makeFingerprint(v, masks);
+            Value = MakeFingerprint(v);
         }
 
-        private void build_by_features_md5(List<string> features)
+        private void BuildByFeaturesMd5(List<string> features)
         {
-            int[] v = setupFingerprint();
-            ulong[] masks = setupMasks();
+            int[] v = SetupFingerprint();
 
             foreach (string feature in features)
             {
                 //this is using MD5 which is REALLY slow
-                BigInteger h = hashfuncmd5(feature);
+                byte[] h = HashFuncMd5(feature);
                 int w = 1;
-                for (int i = 0; i < fpSize; i++)
+                for (int i = 0; i < SizeInBits; i++)
                 {
-                    //convert to BigInt so we can use BitWise
-                    BigInteger bMask = masks[i];
-                    BigInteger result = h & bMask;
+                    byte result = (byte)(h[i / 8] & (1 << (7 - (i % 8))));
                     v[i] += (result > 0) ? w : -w;
                 }
             }
 
-            value = makeFingerprint(v, masks);
+            Value = MakeFingerprint(v);
         }
 
 
-        private ulong makeFingerprint(int[] v, ulong[] masks)
+        private byte[] MakeFingerprint(int[] v)
         {
-            ulong ans = 0;
-            for (int i = 0; i < fpSize; i++)
+            List<byte> ans = new();
+            byte current = 0;
+            for (int i = 0; i < SizeInBits; i++)
             {
                 if (v[i] >= 0)
                 {
-                    ans |= masks[i];
+                    current |= (byte)(1 << (7 - (i % 8)));
+                }
+
+                if (i % 8 == 7)
+                {
+                    ans.Add(current);
+                    current = 0;
                 }
             }
-            return ans;
+            return ans.ToArray();
         }
 
-        private int[] setupFingerprint()
+        private int[] SetupFingerprint()
         {
-            int[] v = new int[fpSize];
+            int[] v = new int[SizeInBits];
             for (int i = 0; i < v.Length; i++) v[i] = 0;
             return v;
         }
 
-        private ulong[] setupMasks()
+        public byte[] HashFuncJenkins(string x)
         {
-            ulong[] masks = new ulong[fpSize];
-            for (int i = 0; i < masks.Length; i++)
-            {
-                masks[i] = (ulong)1 << i;
-            }
-            return masks;
-        }
-
-        public ulong hashfuncjenkins(string x)
-        {
-            var jenkinsLookup3 = JenkinsLookup3Factory.Instance.Create(new JenkinsLookup3Config() { HashSizeInBits = 64 });
+            var jenkinsLookup3 = JenkinsLookup3Factory.Instance.Create(new JenkinsLookup3Config() { HashSizeInBits = SizeInBits });
             var resultBytes = jenkinsLookup3.ComputeHash(x);
-
-            var y = BitConverter.ToUInt64(resultBytes.Hash, 0);
-
-            return y;
+            return resultBytes.Hash;
         }
 
-        private BigInteger hashfuncmd5(string x)
+        private byte[] HashFuncMd5(string x)
         {
-            string hexValue = hashfunc_hashtostring(x);
-            BigInteger b = hashfunc_hashstringtobignasty(hexValue);
-            return b;
-        }
-        public string hashfunc_hashtostring(string x)
-        {
+            var prolongedHash = new byte[SizeInBits];
+            byte[] md5Data;
             using (MD5 md5Hash = MD5.Create())
             {
-                byte[] data = md5Hash.ComputeHash(Encoding.UTF8.GetBytes(x));
-
-                string returnString = "";
-                for (int i = 0; i < data.Length; i++)
-                {
-                    returnString += data[i].ToString("x2");
-                }
-                return returnString;
+                md5Data = md5Hash.ComputeHash(Encoding.UTF8.GetBytes(x));
             }
-        }
-
-        public BigInteger hashfunc_hashstringtobignasty(string x)
-        {
-            BigInteger bigNumber = BigInteger.Parse(x, NumberStyles.AllowHexSpecifier);
-            return bigNumber;
+            for (int i = 0; i < SizeInBits; i++)
+                prolongedHash[i] = md5Data[i % md5Data.Length];
+            return prolongedHash;
         }
     }
 }

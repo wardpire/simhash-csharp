@@ -9,7 +9,7 @@ namespace SimhashTests
     {
 
         [TestMethod]
-        public void test_ulongtolongbacktoulong_strings()
+        public void UlongToLongBackToUlong_Strings()
         {
             ulong theUlong = 18446744073709551615;
             string stheUlong = Converters.convert_ulong_to_bin(theUlong);
@@ -25,7 +25,7 @@ namespace SimhashTests
         }
 
         [TestMethod]
-        public void test_ulongtolongbacktoulong_native()
+        public void UlongToLongBackToUlong_Native()
         {
             ulong theUlong = 18446744073709551615;
             long cLong = Converters.ConvertUlongToLong(theUlong);
@@ -39,7 +39,7 @@ namespace SimhashTests
         }
 
         [TestMethod]
-        public void test_ulongtobinary()
+        public void UlongToBinary()
         {
             ulong theUlong = 8637903533912358349;
             string stheUlong = Converters.ConvertulongToString(theUlong);

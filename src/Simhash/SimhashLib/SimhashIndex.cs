@@ -1,134 +1,182 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.ComponentModel.DataAnnotations;
 using System.Linq;
 
 namespace SimhashLib
 {
     public class SimhashIndex
     {
-        public static int fpSizeStatic = 64;
-        public int kDistance;
-        public int fpSize = fpSizeStatic;
-        public Dictionary<string, HashSet<string>> bucket;
-        public static List<int> offsets;
+        public int kDistance { get; private set; }
+        public int SizeInBits { get; private set; }
+        
+        private Dictionary<string, HashSet<KeyValuePair<long, byte[]>>> _bucket;
 
         //whitepaper says 64 and 3 are optimal. the ash tray says you've been up all night...
-        public SimhashIndex(Dictionary<long, Simhash> objs, int f = 64, int k = 3)
+        public SimhashIndex(Dictionary<long, Simhash> objs, int sizeInBits = 64, int k = 3)
         {
             this.kDistance = k;
-            this.fpSize = f;
+            SetFpSize(sizeInBits);
             var bucketHashSet = new HashSet<string>();
-            bucket = new Dictionary<string, HashSet<string>>();
-
-            offsets = make_offsets();
+            _bucket = new();
 
             foreach (KeyValuePair<long, Simhash> q in objs)
             {
-                add(q.Key, q.Value);
+                Add(q.Key, q.Value);
             }
         }
 
-        public HashSet<long> get_near_dups(Simhash simhash)
+        private void SetFpSize(int fpSize)
+        {
+            if (fpSize % 8 != 0)
+                throw new ArgumentException("Argument 'sizeInBits' has to be a multiple of 8");
+            SizeInBits = fpSize;
+        }
+
+        public HashSet<long> GetNearDups(Simhash simhash)
         {
             /*
             "simhash" is an instance of Simhash
             return a list of obj_id, which is in type of long (for now)
             */
-            if (simhash.fpSize != this.fpSize) throw new Exception();
-            
+            if (simhash.SizeInBits != this.SizeInBits) throw new Exception($"Simhash must have same size as index {simhash.SizeInBits}x{SizeInBits}");
+
             var ans = new HashSet<long>();
 
-            foreach (string key in get_keys(simhash))
+            foreach (var key in GetKeysInternal(simhash))
             {
-                if (bucket.ContainsKey(key))
+                if (_bucket.ContainsKey(key))
                 {
-                    var dups = bucket[key];
+                    var dups = _bucket[key];
                     foreach (var dup in dups)
                     {
-                        string[] parts = dup.Split(',');
-                        ulong fp = Convert.ToUInt64(parts[0]);
-                        long obj_id = Convert.ToInt64(parts[1]);
-                        var sim2 = new Simhash(fp);
-                        int d = simhash.distance(sim2);
+                        var sim2 = new Simhash(dup.Value);
+                        int d = simhash.Distance(sim2);
                         if (d <= kDistance)
                         {
-                            ans.Add(obj_id);
+                            ans.Add(dup.Key);
                         }
                     }
                 }
             }
             return ans;
         }
-        public void add(long obj_id, Simhash simhash)
+        public void Add(long obj_id, Simhash simhash)
         {
-            foreach (string key in get_keys(simhash))
+            foreach (string key in GetKeysInternal(simhash))
             {
-                string v = string.Format("{0},{1}", simhash.value, obj_id);
-                if (!bucket.ContainsKey(key))
+                var v = new KeyValuePair<long, byte[]>(obj_id, simhash.Value);
+                if (!_bucket.ContainsKey(key))
                 {
-                    var bucketHashSet = new HashSet<string>() { v };
-                    bucket.Add(key, bucketHashSet);
+                    var bucketHashSet = new HashSet<KeyValuePair<long, byte[]>>() { v };
+                    _bucket.Add(key, bucketHashSet);
                 }
                 else
                 {
-                    var values = bucket[key];
+                    var values = _bucket[key];
                     values.Add(v);
                 }
             }
         }
 
-        public void delete(long obj_id, Simhash simhash)
+        public void Delete(long obj_id, Simhash simhash)
         {
-            foreach (string key in get_keys(simhash))
+            if (simhash.SizeInBits != SizeInBits)
+                return;
+
+            foreach (string key in GetKeysInternal(simhash))
             {
-                string v = string.Format("{0},{1}", simhash.value, obj_id);
-                if (bucket.ContainsKey(key))
+                var v = new KeyValuePair<long, byte[]>(obj_id, simhash.Value);
+                if (_bucket.ContainsKey(key))
                 {
-                    bucket[key].Remove(v);
+                    _bucket[key].RemoveWhere(x =>
+                    {
+                        if (x.Key != obj_id)
+                            return false;
+                        var allBytesAreSame = true;
+                        var bytesCount = simhash.SizeInBits / 8;
+                        for (int i = 0; i < bytesCount; i++)
+                        {
+                            if (simhash.Value[i] != x.Value[i])
+                            {
+                                allBytesAreSame = false;
+                                break;
+                            }
+                        }
+                        return allBytesAreSame;
+                    });
                 }
             }
         }
 
-        public List<int> make_offsets()
+        public List<string> GetKeys(Simhash simhash)
         {
-            /*
-            You may optimize this method according to < http://www.wwwconference.org/www2007/papers/paper215.pdf>
-            */
-            //int optimizedSize = 4; replace kDistance with this var.
-            //
-            var ans = new List<int>();
-            for (int i = 0; i < (kDistance + 1); i++)
-            {
-                int offset = fpSize / (kDistance + 1) * i;
-                ans.Add(offset);
-            }
-            return ans;
+            return GetKeysInternal(simhash).ToList();
         }
+        private IEnumerable<string> GetKeysInternal(Simhash simhash)
+        {
+            var bitStep = SizeInBits / kDistance;
+            var oneMoreBitStepFromIndex = (kDistance - (SizeInBits % kDistance)) * bitStep;
 
-        public List<string> get_the_keys(Simhash simhash)
-        {
-            return get_keys(simhash).ToList();
-        }
-        private static IEnumerable<string> get_keys(Simhash simhash)
-        {
-            for (int i = 0; i < offsets.Count; i++)
+            //fpSize=6 bitStep=2
+            //    i2=0  i1=2  i0=4
+            //bits   11    11    10
+
+            //test_get_near_dup_hash
+            //  0          9            20           31           42           53           64
+            //  1-10010111 110-01101101 111-01010110 011-11000000 100-00011100 101-11100000
+
+            byte mask = 0;
+            var lastStoredIndex = simhash.SizeInBits;
+            byte currentByte = 0;
+            List<byte> buffer = new();
+            var positionInOutputByte = 0;
+            var keyCounter = 0;
+            for (int i = simhash.SizeInBits - 1; i >= 0; i--)
             {
-                int off;
-                if (i == (offsets.Count - 1))
+                var localBitSTep = bitStep;
+                if (i >= oneMoreBitStepFromIndex)
+                    localBitSTep++;
+
+                var positionInSourceByte = (simhash.SizeInBits - 1 - i) % 8;
+
+                mask |= (byte)(1 << positionInSourceByte);
+
+                if ((lastStoredIndex - i) == localBitSTep || i == 0)
                 {
-                    off = (fpSizeStatic - offsets[i]);
+                    var snapshot = (byte)(simhash.Value[i / 8] & mask);//snapshot current
+                    currentByte |= (byte)(snapshot >> (positionInSourceByte - positionInOutputByte));
+                    buffer.Add(currentByte);
+                    yield return $"{keyCounter}-{Convert.ToBase64String(buffer.ToArray())}";
+
+                    keyCounter++;
+                    currentByte = 0;
+                    lastStoredIndex = i;
+                    buffer.Clear();
+                    positionInOutputByte = 0;
+                    mask = 0;
                 }
                 else
                 {
-                    off = offsets[i + 1] - offsets[i];
+                    if (positionInSourceByte == 7)
+                    {
+                        var snapshot = (byte)(simhash.Value[i / 8] & mask);//snapshot current part - last chance
+                        currentByte |= (byte)(snapshot >> (7 - positionInOutputByte));
+                        mask = 0;
+                    }
+
+                    if (positionInOutputByte == 7)
+                    {
+                        var snapshot = (byte)(simhash.Value[i / 8] & mask);//snapshot current - we have whole byte
+                        currentByte |= (byte)(snapshot << (7 - positionInSourceByte));
+                        buffer.Add(currentByte);
+                        currentByte = 0;
+                        mask = 0;
+                        positionInOutputByte = 0;
+                    }
+                    else
+                        positionInOutputByte++;
                 }
-
-                double m = (Math.Pow(2, off)) - 1;
-                ulong m64 = Convert.ToUInt64(m);
-                ulong offset64 = Convert.ToUInt64(offsets[i]);
-                ulong c = simhash.value >> offsets[i] & m64;
-
-                yield return string.Format("{0},{1}", c, i);
             }
         }
     }

@@ -41,7 +41,7 @@ namespace SimhashTests
             var index = setUpIndex(1);
             var s = new Simhash();
             s.GenerateSimhash("This is not even close to the text that is loaded by default");
-            var dups = index.get_near_dups(s);
+            var dups = index.GetNearDups(s);
             Assert.AreEqual(0, dups.Count);
 
         }
@@ -56,7 +56,7 @@ namespace SimhashTests
             var features = shingling.tokenize(testData[1], 3);
             s.GenerateSimhash(features);
 
-            var dups = index.get_near_dups(s);
+            var dups = index.GetNearDups(s);
             Assert.AreEqual(1, dups.Count);
         }
     }
