@@ -59,7 +59,7 @@ namespace SimhashLib
         //playing around with hashing algorithms. turns out md5 is a touch slow.
         private HashingType hashAlgorithm = HashingType.Jenkins;
 
-        public void GenerateSimhash(List<string> features)
+        private void GenerateSimhash(List<string> features)
         {
             switch (hashAlgorithm)
             {
@@ -140,7 +140,6 @@ namespace SimhashLib
             Value = MakeFingerprint(v);
         }
 
-
         private byte[] MakeFingerprint(int[] v)
         {
             List<byte> ans = new();
@@ -168,7 +167,7 @@ namespace SimhashLib
             return v;
         }
 
-        public byte[] HashFuncJenkins(string x)
+        private byte[] HashFuncJenkins(string x)
         {
             var jenkinsLookup3 = JenkinsLookup3Factory.Instance.Create(new JenkinsLookup3Config() { HashSizeInBits = SizeInBits });
             var resultBytes = jenkinsLookup3.ComputeHash(x);
